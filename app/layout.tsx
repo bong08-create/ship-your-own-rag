@@ -1,4 +1,4 @@
-import type { Metadata } from 'next';
+import type { Metadata, Viewport } from 'next';
 import './globals.css';
 
 const TITLE = 'Globe Help Assistant';
@@ -13,6 +13,11 @@ export const metadata: Metadata = {
     description: DESCRIPTION,
     type: 'website',
   },
+};
+
+export const viewport: Viewport = {
+  width: 'device-width',
+  initialScale: 1,
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

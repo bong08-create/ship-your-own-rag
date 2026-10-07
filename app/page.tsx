@@ -34,8 +34,15 @@ const markdownComponents = {
   ),
 };
 
+const SUGGESTED_PROMPTS = [
+  'How do I convert data to load on GPlan Plus?',
+  'When do my Globe Rewards points expire?',
+  'How do I create a GlobeOne account?',
+  "What's the minimum spending limit for a new Postpaid line?",
+];
+
 export default function Page() {
-  const { messages, input, handleInputChange, handleSubmit, status, error } = useChat({
+  const { messages, input, handleInputChange, handleSubmit, append, status, error } = useChat({
     api: '/api/chat',
   });
   // Tracks which individual sources have been expanded to their full text,
@@ -43,9 +50,9 @@ export default function Page() {
   const [expandedSources, setExpandedSources] = useState<Record<string, boolean>>({});
 
   return (
-    <main className="mx-auto max-w-3xl p-6">
-      <header className="mb-6">
-        <h1 className="text-2xl font-bold text-slate-900">Globe Help Assistant</h1>
+    <main className="mx-auto max-w-3xl p-4 sm:p-6">
+      <header className="mb-4 sm:mb-6">
+        <h1 className="text-xl sm:text-2xl font-bold text-slate-900">Globe Help Assistant</h1>
         <p className="text-sm text-slate-500">
           Ask about Postpaid &amp; Platinum plans, Prepaid promos, Rewards and
           GlobeOne app. Answers are grounded in Globe&apos;s public Help
@@ -57,12 +64,19 @@ export default function Page() {
         {messages.length === 0 && (
           <li className="rounded-xl border border-dashed border-slate-300 p-4 text-sm text-slate-500">
             <p className="mb-2 font-medium text-slate-600">Try asking:</p>
-            <ul className="list-disc list-inside space-y-1">
-              <li>How do I convert data to load on GPlan Plus?</li>
-              <li>When do my Globe Rewards points expire?</li>
-              <li>How do I create a GlobeOne account?</li>
-              <li>What&apos;s the minimum spending limit for a new Postpaid line?</li>
-            </ul>
+            <div className="flex flex-wrap gap-2">
+              {SUGGESTED_PROMPTS.map((prompt) => (
+                <button
+                  key={prompt}
+                  type="button"
+                  disabled={status === 'streaming' || status === 'submitted'}
+                  onClick={() => append({ role: 'user', content: prompt })}
+                  className="rounded-full border border-slate-300 bg-white px-3 py-1.5 text-xs sm:text-sm text-slate-700 hover:border-cyan-500 hover:text-cyan-700 disabled:opacity-40 text-left"
+                >
+                  {prompt}
+                </button>
+              ))}
+            </div>
           </li>
         )}
         {messages.map((m) => (
@@ -77,8 +91,8 @@ export default function Page() {
             <div
               className={
                 m.role === 'user'
-                  ? 'inline-block rounded-2xl bg-cyan-600 text-white px-4 py-2 max-w-[85%]'
-                  : 'inline-block rounded-2xl bg-white border border-slate-200 px-4 py-2 max-w-[85%]'
+                  ? 'inline-block rounded-2xl bg-cyan-600 text-white px-4 py-2 max-w-[90%] sm:max-w-[85%]'
+                  : 'inline-block rounded-2xl bg-white border border-slate-200 px-4 py-2 max-w-[90%] sm:max-w-[85%]'
               }
             >
               {m.role === 'assistant' ? (
@@ -97,7 +111,7 @@ export default function Page() {
                   inv.toolName === 'getInformation' && (
                     <details
                       key={inv.toolCallId}
-                      className="mt-2 text-sm text-slate-600 max-w-[85%]"
+                      className="mt-2 text-sm text-slate-600 max-w-[90%] sm:max-w-[85%]"
                     >
                       <summary className="cursor-pointer">
                         Sources ({(inv.result as Source[]).length})
