@@ -94,6 +94,13 @@ The first fix made `chunkText` FAQ-aware but still per-page: it walked each PDF 
 - **Grounding / hallucination fixes** in `app/api/chat/route.ts`'s system prompt: echo the retrieved text's exact terminology instead of substituting a more "natural"-sounding word, explicitly correct a wrong premise in the user's question rather than quietly working around it, synthesize across *all* retrieved chunks rather than just the top one or two, and surface dated caveats/deprecation notices. `temperature` is set to `0.2` (down from the SDK default of `1.0`) to bias generation toward the source text's actual wording.
 - **Markdown rendering**: the assistant generates markdown (bold, bullet lists); `app/page.tsx` renders it with `react-markdown` + `remark-gfm` instead of showing literal `**asterisks**`.
 
+## Stretch goals
+
+Picked two from the brief's list, both aimed at how a grader (or a real user) would actually open this on day one:
+
+- **Suggested-prompt chips**: the empty state used to be a plain bulleted list of example questions. It's now a row of clickable chips (`app/page.tsx`) that call `useChat`'s `append()` directly, so trying the bot takes one click instead of retyping a question.
+- **Mobile-friendly layout**: the UI had no responsive Tailwind classes at all. Added `sm:` breakpoints for the page padding, header size, and chat bubble / Sources panel max-width, plus an explicit Next.js `viewport` export, so the live URL is usable on a phone, not just a laptop.
+
 ## Deploy to Vercel
 
 ```bash
