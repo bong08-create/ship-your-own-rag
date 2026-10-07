@@ -2,7 +2,7 @@
 
 A streaming RAG chatbot built with [Next.js 15](https://nextjs.org/), the [Vercel AI SDK](https://sdk.vercel.ai/), and [Upstash Vector](https://upstash.com/docs/vector), answering questions over **Globe Telecom's public Philippines Help Center** (Postpaid & Platinum plans, the GlobeOne app, Rewards, and Prepaid services). Built for the AIM Generative AI and Agentic AI course, Week 14 Graded Mini Project ("Ship Your Own RAG").
 
-**Live demo:** _add your deployed Vercel URL here after `vercel --prod`_
+**Live demo:** https://ship-your-own-rag.vercel.app
 
 ## What's here
 
