@@ -52,59 +52,86 @@ type Chunk = { text: string; page: number };
  * which scenario the text actually applied to, because that context simply
  * wasn't in what it received.
  *
- * This chunker instead walks each page line by line and starts a new unit
- * whenever it hits a line that looks like a question (ends in "?"), so each
- * chunk is a complete question + its full answer. Units shorter than
- * MIN_CHUNK_SIZE (e.g. a stray section header before the first real
- * question) are merged into a neighboring unit rather than kept as their
- * own low-value, context-free chunk. Units longer than MAX_CHUNK_SIZE (e.g.
- * a long numbered-steps answer) fall back to the old sliding-window split so
- * no single chunk gets too large for embedding quality.
+ * This chunker walks the WHOLE document's lines in one continuous stream
+ * (not page by page -- see below) and starts a new unit whenever it hits a
+ * line that looks like a question (ends in "?"), so each chunk is a
+ * complete question + its full answer, even when that answer physically
+ * spans a PDF page break. Units shorter than MIN_CHUNK_SIZE (e.g. a stray
+ * section header before the first real question) are merged into a
+ * neighboring unit rather than kept as their own low-value, context-free
+ * chunk. Units longer than MAX_CHUNK_SIZE (e.g. a long numbered-steps
+ * answer) fall back to the old sliding-window split so no single chunk
+ * gets too large for embedding quality.
+ *
+ * Each input line carries the page it came from; a chunk is tagged with
+ * the page its FIRST line (normally its question) came from, since that's
+ * what a citation should point a reader to -- even if the chunk's answer
+ * continues onto the next page.
+ *
+ * Earlier version chunked strictly per PDF page, independently. That broke
+ * on any answer long enough to spill onto the next physical page: e.g.
+ * "Can I use the Loans service while abroad?" sits near the bottom of page
+ * 64, and its answer continues onto page 65. Chunked per page, that
+ * produced two broken chunks -- a page-64 fragment truncated mid-answer,
+ * and an orphaned page-65 continuation with no question of its own to
+ * attach to (so no heading could be shown for it in the UI). The worst
+ * case found: "What can I redeem in the Globe Rewards catalog using my
+ * points once I join?" sat at the very bottom of page 48 with its entire
+ * answer on page 49, producing a chunk that was literally just the bare
+ * question with zero information -- a genuinely weak citation that still
+ * scored well in retrieval (a question about redeeming rewards naturally
+ * embeds close to a user's own question about redeeming rewards). Chunking
+ * the full document as one continuous line stream fixes both cases at the
+ * source instead of leaving two broken halves for the UI to work around.
  */
-function chunkText(text: string, page: number): Chunk[] {
-  const lines = text
-    .split('\n')
-    .map((l) => l.trim())
-    .filter((l) => l.length > 0);
+type Line = { text: string; page: number };
+
+function chunkLines(lines: Line[]): Chunk[] {
   if (lines.length === 0) return [];
 
-  // Group lines into question-led units.
-  const units: string[] = [];
+  // Group lines into question-led units, tracking which page each unit's
+  // first line came from.
+  const units: Chunk[] = [];
   let buf: string[] = [];
-  for (const line of lines) {
+  let bufPage: number | null = null;
+  for (const { text: line, page } of lines) {
     const looksLikeQuestion = /\?\s*$/.test(line);
     if (looksLikeQuestion && buf.length > 0) {
-      units.push(buf.join(' '));
+      units.push({ text: buf.join(' '), page: bufPage as number });
       buf = [line];
+      bufPage = page;
     } else {
+      if (bufPage === null) bufPage = page;
       buf.push(line);
     }
   }
-  if (buf.length > 0) units.push(buf.join(' '));
+  if (buf.length > 0) units.push({ text: buf.join(' '), page: bufPage as number });
 
   // Merge fragments shorter than MIN_CHUNK_SIZE into a neighbor: forward if
-  // it's the first unit on the page (typically a stray header before the
-  // first question), backward otherwise.
+  // it's the first unit in the document (typically a stray header before
+  // the first question), backward otherwise. The merged unit keeps the
+  // page of whichever neighbor it merges into, since that's still the page
+  // its (real) question started on.
   const merged = [...units];
   for (let idx = 0; idx < merged.length; idx++) {
-    if (merged[idx].length >= MIN_CHUNK_SIZE) continue;
+    if (merged[idx].text.length >= MIN_CHUNK_SIZE) continue;
     if (idx === 0 && merged.length > 1) {
-      merged[1] = (merged[0] + ' ' + merged[1]).trim();
-      merged[0] = '';
+      merged[1] = { text: (merged[0].text + ' ' + merged[1].text).trim(), page: merged[1].page };
+      merged[0] = { text: '', page: merged[0].page };
     } else if (idx > 0) {
-      merged[idx - 1] = (merged[idx - 1] + ' ' + merged[idx]).trim();
-      merged[idx] = '';
+      merged[idx - 1] = { text: (merged[idx - 1].text + ' ' + merged[idx].text).trim(), page: merged[idx - 1].page };
+      merged[idx] = { text: '', page: merged[idx].page };
     }
   }
-  const cleaned = merged.filter((u) => u.length > 0);
+  const cleaned = merged.filter((u) => u.text.length > 0);
 
   // Cap oversized units with the sliding-window split as a fallback.
   const out: Chunk[] = [];
   for (const unit of cleaned) {
-    if (unit.length <= MAX_CHUNK_SIZE) {
-      out.push({ text: unit, page });
+    if (unit.text.length <= MAX_CHUNK_SIZE) {
+      out.push(unit);
     } else {
-      out.push(...slidingWindowSplit(unit, page));
+      out.push(...slidingWindowSplit(unit.text, unit.page));
     }
   }
   return out;
@@ -173,12 +200,22 @@ async function loadAndChunkPdf(filePath: string): Promise<Chunk[]> {
   const buf = await fs.readFile(filePath);
   const parsed = await pdfParse(buf, { pagerender: renderPageWithBoundary });
   const pages = parsed.text.split('\f');
-  const chunks: Chunk[] = [];
+
+  // Flatten every page's lines (footer already stripped) into one
+  // continuous stream, each line still tagged with its source page, so
+  // chunkLines can see straight through page breaks. See the chunkLines
+  // doc comment for why this replaced per-page chunking.
+  const allLines: Line[] = [];
   pages.forEach((pageText, pageIdx) => {
+    const page = pageIdx + 1;
     const cleaned = pageText.replace(PAGE_FOOTER_RE, '').trim();
     if (cleaned.length === 0) return;
-    chunks.push(...chunkText(cleaned, pageIdx + 1));
+    for (const text of cleaned.split('\n').map((l) => l.trim()).filter((l) => l.length > 0)) {
+      allLines.push({ text, page });
+    }
   });
+
+  const chunks = chunkLines(allLines);
   console.log(`  pdf-parse reports ${parsed.numpages} actual PDF page(s)`);
   return chunks;
 }
