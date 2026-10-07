@@ -1,5 +1,6 @@
 'use client';
 
+import { useState } from 'react';
 import { useChat } from '@ai-sdk/react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -37,14 +38,17 @@ export default function Page() {
   const { messages, input, handleInputChange, handleSubmit, status, error } = useChat({
     api: '/api/chat',
   });
+  // Tracks which individual sources have been expanded to their full text,
+  // keyed by "<toolCallId>-<index>", so expanding one doesn't affect others.
+  const [expandedSources, setExpandedSources] = useState<Record<string, boolean>>({});
 
   return (
     <main className="mx-auto max-w-3xl p-6">
       <header className="mb-6">
         <h1 className="text-2xl font-bold text-slate-900">Globe Help Assistant</h1>
         <p className="text-sm text-slate-500">
-          Ask about Postpaid &amp; Platinum plans, the GlobeOne app, Rewards, or
-          Prepaid services. Answers are grounded in Globe&apos;s public Help
+          Ask about Postpaid &amp; Platinum plans, Prepaid promos, Rewards and
+          GlobeOne app. Answers are grounded in Globe&apos;s public Help
           Center articles, with sources shown under each response.
         </p>
       </header>
@@ -99,20 +103,64 @@ export default function Page() {
                         Sources ({(inv.result as Source[]).length})
                       </summary>
                       <ul className="mt-2 space-y-2">
-                        {(inv.result as Source[]).map((src, i) => (
-                          <li
-                            key={i}
-                            className="border-l-2 border-cyan-500 pl-3"
-                          >
-                            <span className="text-xs text-slate-400">
-                              page {src.page ?? '?'} · score{' '}
-                              {typeof src.score === 'number'
-                                ? src.score.toFixed(2)
-                                : '—'}
-                            </span>
-                            <p>{src.text}</p>
-                          </li>
-                        ))}
+                        {(inv.result as Source[]).map((src, i) => {
+                          const text = src.text ?? '';
+                          // Our chunker groups text into FAQ-style units that
+                          // start with their own question, so pull that out
+                          // as a scannable heading instead of dumping the
+                          // raw chunk. A "?" showing up very late usually
+                          // means the chunk didn't start with a clean
+                          // question, so fall back to plain truncated text.
+                          const qIndex = text.indexOf('?');
+                          const hasHeading = qIndex !== -1 && qIndex < 150;
+                          const heading = hasHeading
+                            ? text.slice(0, qIndex + 1).trim()
+                            : null;
+                          const body = hasHeading
+                            ? text.slice(qIndex + 1).trim()
+                            : text;
+                          const wasTruncated = body.length > 220;
+                          const excerpt = wasTruncated
+                            ? body.slice(0, 220).trim() + '…'
+                            : body;
+                          const sourceKey = `${inv.toolCallId}-${i}`;
+                          const isExpanded = expandedSources[sourceKey] ?? false;
+                          return (
+                            <li
+                              key={i}
+                              className="border-l-2 border-cyan-500 pl-3"
+                            >
+                              <span className="text-xs text-slate-400">
+                                page {src.page ?? '?'} · score{' '}
+                                {typeof src.score === 'number'
+                                  ? src.score.toFixed(2)
+                                  : '—'}
+                              </span>
+                              {heading && (
+                                <p className="font-medium text-slate-700 mt-0.5">
+                                  {heading}
+                                </p>
+                              )}
+                              <p className="text-slate-600">
+                                {isExpanded ? body : excerpt}
+                              </p>
+                              {wasTruncated && (
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setExpandedSources((prev) => ({
+                                      ...prev,
+                                      [sourceKey]: !prev[sourceKey],
+                                    }))
+                                  }
+                                  className="text-xs text-cyan-700 hover:text-cyan-800 mt-1"
+                                >
+                                  {isExpanded ? 'Show less' : 'Show full text'}
+                                </button>
+                              )}
+                            </li>
+                          );
+                        })}
                       </ul>
                     </details>
                   ),
