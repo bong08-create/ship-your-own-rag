@@ -1,6 +1,8 @@
-# Week 14A · Next.js RAG starter
+# Ship Your Own RAG — Globe Telecom Help Center Assistant
 
-A streaming chat app on top of your knowledge base, built with [Next.js 15](https://nextjs.org/), the [Vercel AI SDK](https://sdk.vercel.ai/), and [Upstash Vector](https://upstash.com/docs/vector). This is the working solution for Section 4 of Week 14A.
+A streaming RAG chatbot built with [Next.js 15](https://nextjs.org/), the [Vercel AI SDK](https://sdk.vercel.ai/), and [Upstash Vector](https://upstash.com/docs/vector), answering questions over **Globe Telecom's public Philippines Help Center** (Postpaid & Platinum plans, the GlobeOne app, Rewards, and Prepaid services). Built for the AIM Generative AI and Agentic AI course, Week 14 Graded Mini Project ("Ship Your Own RAG").
+
+**Live demo:** _add your deployed Vercel URL here after `vercel --prod`_
 
 ## What's here
 
@@ -8,21 +10,14 @@ A streaming chat app on top of your knowledge base, built with [Next.js 15](http
 14A-nextjs-rag/
 ├── app/
 │   ├── globals.css
-│   ├── layout.tsx
-│   ├── page.tsx                          # FINAL UI — useChat + sources
-│   └── api/chat/route.ts                 # FINAL handler — RAG-as-tool-call
+│   ├── layout.tsx                        # Title, description, Open Graph metadata
+│   ├── page.tsx                          # Chat UI — useChat + markdown rendering + sources
+│   └── api/chat/route.ts                 # RAG-as-tool-call handler + grounding system prompt
 ├── lib/
-│   └── seed.ts                           # Embeds data/sample.pdf into Upstash
+│   └── seed.ts                           # Chunks data/globe-telecom-help-center.pdf into Upstash
 ├── data/
-│   └── sample.pdf                        # Synthetic Acme Widget Spec
-├── steps/                                # Reference snapshots per workshop step
-│   ├── step2-plain-chat/
-│   │   ├── page.tsx                      # Step 2: useChat client component
-│   │   └── route.ts                      # Step 2: vanilla streamText handler
-│   ├── step4-rag-as-tool/
-│   │   └── route.ts                      # Step 4: route handler with the tool
-│   └── step5-sources/
-│       └── page.tsx                      # Step 5: page with <details> sources
+│   └── globe-telecom-help-center.pdf     # The corpus (85 pages, scraped from globe.com.ph/help)
+├── steps/                                # Original workshop reference snapshots (unused by the final app)
 ├── package.json
 ├── tsconfig.json
 ├── next.config.mjs
@@ -33,8 +28,6 @@ A streaming chat app on top of your knowledge base, built with [Next.js 15](http
 └── README.md
 ```
 
-
-
 ## Setup (5 minutes)
 
 ```bash
@@ -43,16 +36,25 @@ npm install
 
 # 2. environment
 cp .env.example .env.local
-# edit .env.local and paste your real OPENAI_API_KEY,
-# UPSTASH_VECTOR_REST_URL, UPSTASH_VECTOR_REST_TOKEN
+```
 
-# 3. seed the vector index (one-time, or whenever data/sample.pdf changes)
+Edit `.env.local` and fill in:
+
+| Variable | Notes |
+| --- | --- |
+| `OPENAI_API_KEY` | Your OpenAI (or OpenAI-compatible proxy) API key. |
+| `OPENAI_BASE_URL` | **Optional.** Only needed if you're using an OpenAI-compatible proxy instead of OpenAI directly — for example [Vocareum](https://vocareum.com/)'s proxy (`https://openai.vocareum.com/v1`). Leave unset to use the real OpenAI API. |
+| `UPSTASH_VECTOR_REST_URL` | From your Upstash Vector index's dashboard. |
+| `UPSTASH_VECTOR_REST_TOKEN` | Use the **full read-write Token**, not the Read-Only Token — seeding needs write access. |
+
+```bash
+# 3. seed the vector index (one-time, or whenever data/*.pdf or the chunker changes)
 npm run seed
 ```
 
-The seed script reads `data/sample.pdf`, chunks it, embeds each chunk with `text-embedding-3-small`, and upserts to your Upstash Vector index. Re-running it overwrites the same ids, so it's idempotent.
+The seed script reads `data/globe-telecom-help-center.pdf`, chunks it (see "Chunking approach" below), embeds each chunk with `text-embedding-3-small`, and upserts to your Upstash Vector index. Re-running it overwrites the same ids, so it's idempotent.
 
-## Run the final app
+## Run locally
 
 ```bash
 npm run dev
@@ -61,34 +63,33 @@ npm run dev
 
 Try asking:
 
-- *"What auth methods does the API support?"*
-- *"What happens when I exceed the rate limit?"*
-- *"Compare OAuth2 and API key authentication."*
+- *"How do I convert my mobile data to load on GPlan Plus?"*
+- *"What are the accredited payment channels for my Postpaid bill?"*
+- *"How do I activate a new eSIM?"*
+- *"When do my reward points expire?"*
 
-You should see tokens stream into the assistant bubble, then a **Sources (N)** disclosure beneath it. Expanding it shows page numbers, similarity scores, and the chunk text the model retrieved.
+You'll see tokens stream into the assistant bubble (rendered as formatted markdown), then a **Sources (N)** disclosure beneath it. Expanding it shows page numbers, similarity scores, and the chunk text the model retrieved — useful for checking whether an answer is actually grounded in the source material.
 
-## Walk through the steps
+## The corpus
 
-The `/steps` folder contains reference snapshots. To try them, copy each file over the matching path in `app/`:
+Scraped from Globe Telecom's public Help Center (`globe.com.ph/help`) — genuinely public FAQ content, no login or paywall. Scoped to four sections: Postpaid & Platinum plans, the GlobeOne app, Rewards (points and vouchers), and Prepaid services. GCash is deliberately excluded (it's a separate company) to keep the corpus focused on one coherent domain.
 
+Known limitations, left undocumented rather than silently hidden:
+- A handful of scraped HTML tables flattened into somewhat garbled text during PDF extraction (e.g. a payment-channels table). The chunker (below) keeps these as complete units so nothing gets silently dropped, but the underlying text itself can still read a bit jumbled in the Sources panel.
+- Some FAQ boilerplate is duplicated verbatim across related Help Center articles — a corpus characteristic, not a bug.
+- A few topics genuinely aren't covered (e.g. "GlobeOne Quests" — confirmed absent via direct text search, not a retrieval failure); the assistant is expected to say so rather than guess.
 
-| Step | Files to copy                                                | What it shows                              |
-| ---- | ------------------------------------------------------------ | ------------------------------------------ |
-| 2    | `steps/step2-plain-chat/page.tsx` → `app/page.tsx`           | useChat working against vanilla streamText |
-|      | `steps/step2-plain-chat/route.ts` → `app/api/chat/route.ts`  | (no RAG yet — verify streaming first)      |
-| 4    | `steps/step4-rag-as-tool/route.ts` → `app/api/chat/route.ts` | The model decides when to call retrieval   |
-| 5    | `steps/step5-sources/page.tsx` → `app/page.tsx`              | Sources rendered below answers             |
+## Chunking approach
 
+This corpus is a dense, continuous stream of `Question? Answer. Next question? Answer...` FAQ content with no blank-line separators between entries. A plain fixed-size sliding window (the original starter's approach) can cut a chunk boundary mid-answer — severing an answer from its own question. In testing this caused a real bug: an eSIM-*replacement* answer ("visit a Globe Store, take a selfie") got retrieved and presented as general new-eSIM guidance, because the chunk boundary had split off its disambiguating question heading ("How do I request an eSIM replacement...") into the previous chunk.
 
-After Step 5, the snapshots and the final `app/page.tsx` + `app/api/chat/route.ts` are the same shape — the final versions add a small system prompt and some chrome (a header, slightly nicer styling, status / error rendering).
+`lib/seed.ts`'s `chunkText` is instead FAQ-aware: it walks each page line by line and starts a new chunk whenever a line ends in `?` (a new FAQ question), so each chunk is a complete question + its full answer. Short fragments (e.g. a stray section header) merge into a neighboring chunk; unusually long answers fall back to a size-capped sliding-window split. This fixed the eSIM bug above and a related completeness gap (a payment-channels answer that was dropping bank names from a lower-ranked, boundary-split chunk).
 
-## Use your own corpus
+## Other notable fixes along the way
 
-1. Replace `data/sample.pdf` with your own PDF.
-2. Re-run `npm run seed`.
-3. Restart `npm run dev`.
-
-For multi-PDF, multi-version, or permission-aware retrieval see Week 14B Section 4.
+- **PDF page-boundary bug**: `pdf-parse` doesn't insert a page separator between pages by default — it just joins everything with `\n\n`. A custom `pagerender` callback in `lib/seed.ts` inserts an explicit form-feed so each chunk gets correct per-page metadata.
+- **Grounding / hallucination fixes** in `app/api/chat/route.ts`'s system prompt: echo the retrieved text's exact terminology instead of substituting a more "natural"-sounding word, explicitly correct a wrong premise in the user's question rather than quietly working around it, synthesize across *all* retrieved chunks rather than just the top one or two, and surface dated caveats/deprecation notices. `temperature` is set to `0.2` to bias generation toward the source text's actual wording.
+- **Markdown rendering**: the assistant generates markdown (bold, bullet lists); `app/page.tsx` renders it with `react-markdown` + `remark-gfm` instead of showing literal `**asterisks**`.
 
 ## Deploy to Vercel
 
@@ -97,23 +98,29 @@ npm i -g vercel  # if you don't have it
 vercel           # first run: log in, link the project
 vercel link
 vercel env add OPENAI_API_KEY
+vercel env add OPENAI_BASE_URL          # only if using a proxy like Vocareum
 vercel env add UPSTASH_VECTOR_REST_URL
 vercel env add UPSTASH_VECTOR_REST_TOKEN
 vercel --prod
 ```
 
-You'll get a public URL like `https://rag-ui-xxx.vercel.app`. The seed is local — you only need to seed once per index, regardless of where the chat app is hosted.
+You'll get a public URL like `https://ship-your-own-rag-xxx.vercel.app`. The index is already seeded — you don't need to re-run `npm run seed` for deployment, regardless of where the chat app is hosted.
 
 ## Common errors
 
+| Symptom | Fix |
+| --- | --- |
+| `Error: missing UPSTASH_VECTOR_REST_URL` | Run `npm run seed` after setting `.env.local`. Verify in Upstash. |
+| Page renders but submitting hangs | Route handler missing `toDataStreamResponse()`. Check `route.ts`. |
+| Empty / very short answer after a tool call | `maxSteps` not set or set to 1. Set `maxSteps: 3` on `streamText`. |
+| `Cannot use useChat in a Server Component` | Forgot `'use client'` at the top of `page.tsx`. |
+| Build error: `Type '...' is not assignable to ...` | Run `npx tsc --noEmit` to see the full type error. |
+| `vercel --prod` build fails on missing env vars | `vercel env add ...` and pick **Production** when prompted. |
+| `Invalid Key. Expired: ...` | Time-limited proxy keys (e.g. Vocareum) expire — get a fresh key and update `OPENAI_API_KEY`. |
+| A `route.ts` change doesn't seem to take effect | Restart `npm run dev` — API route hot-reload isn't always reliable. |
+| Re-asking the same question gives a different/worse result with no sources | The model can recall its prior answer from chat history instead of re-querying. Reload the page to test in a fresh conversation. |
+| Chunks look garbled / duplicated in the Sources panel | Likely a scraped HTML table that didn't flatten cleanly — see "The corpus" above. Usually not worth chasing with prompt changes; it's an extraction-quality issue. |
 
-| Symptom                                            | Fix                                                                |
-| -------------------------------------------------- | ------------------------------------------------------------------ |
-| `Error: missing UPSTASH_VECTOR_REST_URL`           | Run `npm run seed` after setting `.env.local`. Verify in Upstash.  |
-| Page renders but submitting hangs                  | Route handler missing `toDataStreamResponse()`. Check `route.ts`.  |
-| Empty / very short answer after a tool call        | `maxSteps` not set or set to 1. Set `maxSteps: 3` on `streamText`. |
-| `Cannot use useChat in a Server Component`         | Forgot `'use client'` at the top of `page.tsx`.                    |
-| Build error: `Type '...' is not assignable to ...` | Run `npx tsc --noEmit` to see the full type error.                 |
-| `vercel --prod` build fails on missing env vars    | `vercel env add ...` and pick **Production** when prompted.        |
+## Reference: original workshop steps
 
-
+The `/steps` folder contains the original Week 14A workshop's incremental snapshots (plain chat → RAG-as-tool-call → sources rendering) and isn't used by the final app — kept for reference only.
