@@ -157,14 +157,27 @@ async function renderPageWithBoundary(pageData: any): Promise<string> {
   return text + '\f';
 }
 
+// Our own corpus-generation script (fetch_globe_corpus.py) draws a
+// "Page N" footer on every PDF page via FPDF's footer() callback. That
+// footer is literal text content like any other text item on the page, so
+// renderPageWithBoundary above captures it along with everything else --
+// and because it's drawn last, it ends up as the trailing text of
+// whichever chunk happens to be the LAST one on that page. That's a
+// self-inflicted extraction artifact, not real corpus content, and not
+// every page's last-chunk is what gets retrieved for a given query --
+// which is why it only showed up in some Sources panel entries, not all.
+// Stripped here, once per page, before chunking.
+const PAGE_FOOTER_RE = /\s*Page\s*\d+\s*$/i;
+
 async function loadAndChunkPdf(filePath: string): Promise<Chunk[]> {
   const buf = await fs.readFile(filePath);
   const parsed = await pdfParse(buf, { pagerender: renderPageWithBoundary });
   const pages = parsed.text.split('\f');
   const chunks: Chunk[] = [];
   pages.forEach((pageText, pageIdx) => {
-    if (pageText.trim().length === 0) return;
-    chunks.push(...chunkText(pageText.trim(), pageIdx + 1));
+    const cleaned = pageText.replace(PAGE_FOOTER_RE, '').trim();
+    if (cleaned.length === 0) return;
+    chunks.push(...chunkText(cleaned, pageIdx + 1));
   });
   console.log(`  pdf-parse reports ${parsed.numpages} actual PDF page(s)`);
   return chunks;
